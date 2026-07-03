@@ -1,12 +1,12 @@
-# Writeup: pwnable.kr - col
+# pwnable.kr - col Writeup
 
-The "col" challenge on pwnable.kr introduces the concept of hash collisions and basic memory alignment constraints in C. It requires the user to bypass a passcode validation check by understanding how type casting alters the interpretation of data in memory.
+This is the second challenge on pwnable.kr, and it's basically a quick lesson in how C handles memory allocation and pointer casting. It shows you exactly how easily a custom hash verification can be broken if you understand how data gets reinterpreted in memory.
 
 ![](col1.png)
 
-## Source Code (col.c)
+## The Source Code
 
-The following is the source code provided for the vulnerable binary:
+Here is the source code for the binary:
 
     #include <stdio.h>
     #include <string.h>
@@ -41,57 +41,44 @@ The following is the source code provided for the vulnerable binary:
         }
     }
 
-## Code Analysis
+## Breaking Down the Pointer Magic
 
-To successfully solve this challenge and read the flag, we need to satisfy the condition where `check_password(argv[1])` returns a value equal to `hashcode` (`0x21DD09EC`). 
+Looking at the main function, our target is clear: we need the `check_password` function to return `0x21DD09EC`. But we have two main constraints to deal with:
+1. Our input string must be exactly 20 bytes long.
+2. We can't use null bytes (\x00) because `strlen` will think the string ended early, failing the length check.
 
-There are two major constraints we must follow:
-1. The input string `argv[1]` must be exactly 20 bytes long, enforced by `strlen(argv[1]) != 20`.
-2. The input cannot contain null bytes (`\x00`), because `strlen` counts characters until it hits a null byte. A premature null byte would make the length appear shorter than 20 bytes and fail the validation check.
+The core of the challenge lies in this line inside `check_password`:
 
-### Understanding the Pointer Cast
+    int* ip = (int*)p;
 
-Inside `check_password`, the program performs a pointer type cast:
-    
-`int* ip = (int*)p;`
+The code takes our input pointer, which starts as a character pointer (`char*` where each element is 1 byte), and explicitly typecasts it into an integer pointer (`int*` where each element is 4 bytes). Because our input string is 20 bytes long, treating it as an array of 4-byte integers splits it into exactly 5 distinct integers (20 / 4 = 5). The loop then just sums these 5 integers up and saves them into `res`.
 
-The input `p` is initially a pointer to a character array (`char*`), where each element is 1 byte. By casting it to an integer pointer (`int*`), the program tells the compiler to treat the underlying memory as an array of 4-byte integers. 
+## Doing the Math
 
-Because the input is 20 bytes long, casting it to an `int*` groups the 20 individual characters into an array of exactly 5 integers ($20 \div 4 = 5$). The subsequent `for` loop sums these 5 integers together into the `res` variable.
+We need to come up with 5 integers that add up to `0x21DD09EC`. 
 
-## Calculating the Passcode
+If we convert `0x21DD09EC` to decimal, we get 568134124. 
+Dividing this by 5 gives us 113626824 with a remainder of 4.
 
-Our objective is to find 5 four-byte integers that sum up to `0x21DD09EC` without any of the individual bytes evaluating to `0x00`.
-
-Let's convert `0x21DD09EC` to its decimal equivalent:
-`0x21DD09EC` = 568134124
-
-Dividing this target value by 5 gives us a baseline integer value:
-568134124 / 5 = 113626824 with a remainder of 4.
-
-This means we can use four identical integers equal to 113626824, and one final integer that absorbs the remainder:
-* Integers 1 to 4: 113626824
-* Integer 5: 113626824 + 4 = 113626828
-
-Let's convert these back to hexadecimal format:
-* 113626824 = `0x06C5CEC8`
-* 113626828 = `0x06C5CECC`
+So, we can keep things clean by using the baseline value four times, and adding the remainder to the fifth integer:
+* Integers 1 to 4: 113626824 (which is 0x06C5CEC8)
+* Integer 5: 113626824 + 4 = 113626828 (which is 0x06C5CECC)
 
 
-### Handling Endianness
+### Dealing with Endianness
 
-Modern x86 architectures utilize Little-Endian representation, meaning the least significant byte is stored at the lowest memory address. When passing the bytes via the command line, we must reverse the order of bytes for each integer:
-* `0x06C5CEC8` becomes `\xc8\xce\xc5\x06`
-* `0x06C5CECC` becomes `\xcc\xce\xc5\x06`
+Since x86 architecture uses Little-Endian, the least significant bytes are stored first in memory. When we pass our payload through the command line, we have to reverse the byte order of our hex values:
+* 0x06C5CEC8 becomes \xc8\xce\xc5\x06
+* 0x06C5CECC becomes \xcc\xce\xc5\x06
 
-None of these bytes are `0x00`, so they will safely pass the `strlen` check without truncating the input.
+Notice that none of these bytes are `\x00`, so `strlen` won't choke on them.
 
-## Execution & Flag Extraction
+## Pounding the Binary
 
-We can use an inline Python script to construct the 20-byte payload and pass it directly as an argument to the binary:
+Now we just assemble the payload and pass it to the binary using a quick inline Python command:
 
     ./col $(python -c "print '\xc8\xce\xc5\x06'*4 + '\xcc\xce\xc5\x06'")
 
-Executing this command feeds the constructed integers into the program, triggering the hash collision, and successfully printing out the flag.
+The program handles our 20-byte input, casts it, sums up the values to match the hashcode perfectly, and drops the flag.
 
-![alt text](col2.png)
+![](col2.png)
